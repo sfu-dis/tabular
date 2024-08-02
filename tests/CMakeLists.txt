@@ -1,0 +1,11 @@
+add_executable(thread_tests thread_tests.cc)
+set_target_properties(thread_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+target_link_libraries(thread_tests thread config)
+add_test(NAME thread_tests COMMAND thread_tests)
+
+add_subdirectory(asi)
+add_subdirectory(index)
+add_subdirectory(log)
+add_subdirectory(table)
+add_subdirectory(transaction)
+add_subdirectory(tabular)

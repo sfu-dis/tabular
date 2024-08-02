@@ -1,0 +1,5 @@
+add_executable(sync_storage_test sync_storage_test.cc)
+set_target_properties(sync_storage_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/asi)
+target_link_libraries(sync_storage_test sync_storage config)
+add_test(NAME sync_storage_test COMMAND sync_storage_test)
+

@@ -1,0 +1,24 @@
+set_property(GLOBAL APPEND PROPERTY UTIL_CONFIG_SRC
+  ${CMAKE_CURRENT_SOURCE_DIR}/config.cc
+)
+get_property(UTIL_CONFIG_SRC GLOBAL PROPERTY UTIL_CONFIG_SRC)
+add_library(config ${UTIL_CONFIG_SRC})
+
+find_package(PythonInterp 3.9 REQUIRED)
+find_package(Boost 1.40 COMPONENTS program_options REQUIRED)
+
+include_directories(${Boost_INCLUDE_DIR})
+target_link_libraries(config LINK_PUBLIC ${Boost_LIBRARIES})
+
+file(GLOB_RECURSE CONFIG_GEN_FILES CONFIGURE_DEPENDS
+  "${PROJECT_SOURCE_DIR}/src/*/config.h"
+)
+list(REMOVE_ITEM CONFIG_GEN_FILES ${CMAKE_CURRENT_SOURCE_DIR}/config.h)
+
+add_custom_target(
+  generate_config ALL
+  BYPRODUCTS ${CMAKE_CURRENT_SOURCE_DIR}/config.cc
+  BYPRODUCTS ${CONFIG_GEN_FILES}
+  COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/config.py ${CMAKE_SOURCE_DIR}/src/ ${CMAKE_BINARY_DIR}
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/config.ini
+)

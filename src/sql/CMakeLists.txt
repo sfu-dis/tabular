@@ -1,0 +1,34 @@
+# add_compile_options(-Wno-error=switch)
+add_compile_options(-Wno-switch)
+
+add_library(duckdb_query duckdb_query.cc)
+target_link_libraries(duckdb_query duckdb)
+
+add_library(duckdb_query_benchmark duckdb_query.cc)
+target_link_libraries(duckdb_query_benchmark duckdb)
+target_compile_definitions(duckdb_query_benchmark PUBLIC -DRUN_BENCHMARK)
+
+# This target is not used 
+# add_library(query query.cc)
+# target_link_libraries(query duckdb_query catalog transaction-normal tuple btree_wrapper)
+
+add_library(query_benchmark_tabular_btree query.cc)
+target_link_libraries(query_benchmark_tabular_btree duckdb_query_benchmark inline_btree_catalog transaction-normal tuple inline_btree_wrapper) 
+
+add_library(query_benchmark_naive_tabular_btree query.cc)
+target_link_libraries(query_benchmark_naive_tabular_btree duckdb_query_benchmark naive_tabular_btree_catalog transaction-normal tuple naive_btree_wrapper) 
+
+add_library(query_benchmark_materialized_tabular_btree query.cc)
+target_link_libraries(query_benchmark_materialized_tabular_btree duckdb_query_benchmark materialized_tabular_btree_catalog transaction-normal tuple materialized_tabular_btree_wrapper) 
+
+
+
+add_library(query_benchmark_olc_btree query.cc)
+target_link_libraries(query_benchmark_olc_btree duckdb_query_benchmark olc_btree_catalog transaction-normal tuple olc_btree_wrapper) 
+
+add_library(query_benchmark_masstree query.cc)
+target_link_libraries(query_benchmark_masstree duckdb_query_benchmark masstree_catalog transaction-normal tuple masstree_wrapper)
+
+
+add_subdirectory(execution)
+

@@ -1,0 +1,19 @@
+add_executable(tabular_transaction_stress_test transaction_stress_test.cc)
+set_target_properties(tabular_transaction_stress_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/tabular)
+target_link_libraries(tabular_transaction_stress_test tabular object transaction dynarray config tbb)
+add_test(NAME tabular_transaction_stress_test COMMAND tabular_transaction_stress_test)
+
+add_executable(tabular_btree_test btree_test.cc)
+set_target_properties(tabular_btree_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/tabular)
+target_link_libraries(tabular_btree_test ia_table object transaction dynarray config tbb)
+add_test(NAME tabular_btree_test COMMAND tabular_btree_test)
+
+add_executable(tabular_btree_multithread_test btree_multithread_test.cc)
+set_target_properties(tabular_btree_multithread_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/tabular)
+target_link_libraries(tabular_btree_multithread_test tabular object transaction dynarray config tbb)
+add_test(NAME tabular_btree_multithread_test COMMAND tabular_btree_multithread_test)
+
+add_executable(tabular_inline_btree_test inline_btree_test.cc)
+set_target_properties(tabular_inline_btree_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/tabular)
+target_link_libraries(tabular_inline_btree_test inline_table object occ dynarray config tbb dlog tabular)
+add_test(NAME tabular_inline_btree_test COMMAND tabular_inline_btree_test)

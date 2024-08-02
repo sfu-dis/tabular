@@ -1,0 +1,11 @@
+add_executable(hash_table_test hash_table_test.cc)
+set_target_properties(hash_table_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/index)
+target_link_libraries(hash_table_test occ transaction tabular dlog object)
+target_compile_definitions(hash_table_test PUBLIC RWLOCK STDRW_LOCK)
+add_test(NAME hash_table_test COMMAND hash_table_test)
+
+add_executable(hash_table_tbb_test hash_table_test.cc)
+set_target_properties(hash_table_tbb_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/index)
+target_link_libraries(hash_table_tbb_test occ transaction tabular dlog TBB::tbb object)
+target_compile_definitions(hash_table_tbb_test PUBLIC RWLOCK TBBRW_LOCK)
+add_test(NAME hash_table_tbb_test COMMAND hash_table_tbb_test)
