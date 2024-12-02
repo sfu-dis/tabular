@@ -1,7 +1,15 @@
+add_library(
+  ycsb_masstree
+  ${masstree_SOURCE_DIR}/compiler.cc
+  ${masstree_SOURCE_DIR}/straccum.cc
+  ${masstree_SOURCE_DIR}/str.cc
+  ${masstree_SOURCE_DIR}/string.cc
+)
+
 set(YCSB_SRC ycsb_bench.cc ycsb_loader.cc ycsb_worker.cc)
 
 macro(add_ycsb)
-  cmake_parse_arguments(YCSB "" "NAME" "DEFINITIONS;LIBRARIES" ${ARGN})
+  cmake_parse_arguments(YCSB "" "NAME" "DEFINITIONS;LIBRARIES;INCLUDES" ${ARGN})
 
   add_executable(${YCSB_NAME} ${YCSB_SRC})
   target_link_libraries(${YCSB_NAME} gtest glog perf)
@@ -9,6 +17,7 @@ macro(add_ycsb)
   target_link_libraries(${YCSB_NAME} ${YCSB_LIBRARIES})
   target_link_libraries(${YCSB_NAME} ${JEMALLOC_LIBRARIES})
   target_include_directories(${YCSB_NAME} PUBLIC foedus)
+  target_include_directories(${YCSB_NAME} PUBLIC ${YCSB_INCLUDES})
   target_compile_definitions(${YCSB_NAME} PUBLIC ${YCSB_DEFINITIONS})
 endmacro()
 
@@ -132,4 +141,61 @@ foreach(node_size node_size_suffix IN ZIP_LISTS node_sizes node_size_suffixes)
     LIBRARIES occ dlog_nop
   )
 
+endforeach()
+
+add_ycsb(
+  NAME ycsb_masstree_bench
+  DEFINITIONS MASSTREE
+  LIBRARIES ycsb_masstree
+  INCLUDES ${masstree_SOURCE_DIR}
+)
+
+add_ycsb(
+  NAME ycsb_art_olc_bench
+  DEFINITIONS ARTOLC OMCS_LOCK 
+  LIBRARIES artolc_upgrade
+)
+
+add_ycsb(
+  NAME ycsb_art_lc_stdrw_bench
+  DEFINITIONS ART_LC STDRW_LOCK
+  LIBRARIES artlc_stdrw
+)
+
+add_ycsb(
+  NAME ycsb_art_lc_tbbrw_bench
+  DEFINITIONS ART_LC TBBRW_LOCK
+  LIBRARIES artlc_tbbrw
+)
+
+add_ycsb(
+  NAME ycsb_art_tabular_bench
+  DEFINITIONS ART_TABULAR
+  LIBRARIES art_tabular occ dlog
+)
+
+add_ycsb(
+  NAME ycsb_art_tabular_materialized_bench
+  DEFINITIONS ART_TABULAR
+  LIBRARIES art_tabular_materialized occ dlog
+)
+
+list(APPEND bptree_internal_sizes 256 512 1024 2048 4096 8192 16384)
+list(APPEND bptree_internal_size_suffixes "_256" "_512" "_1K" "_2K" "_4K" "_8K" "_16K")
+
+list(APPEND bptree_log_sizes   4 4 8  8 16 16 32 32 64)
+list(APPEND bptree_block_sizes 4 8 8 16 16 32 32 64 64)
+
+foreach(internal_bytes internal_bytes_suffix IN ZIP_LISTS bptree_internal_sizes bptree_internal_size_suffixes)
+  foreach(log_size block_size IN ZIP_LISTS bptree_log_sizes bptree_block_sizes)
+    add_ycsb(
+      NAME ycsb_bptree_bench${internal_bytes_suffix}_${log_size}_${block_size}
+      DEFINITIONS BPTREE
+                  BPTREE_INTERNAL_BYTES=${internal_bytes}
+                  BPTREE_LOG_SIZE=${log_size}
+                  BPTREE_BLOCK_SIZE=${block_size}
+      INCLUDES "${CMAKE_SOURCE_DIR}/third-party/bptree/ParallelTools"
+               "${CMAKE_SOURCE_DIR}/third-party/bptree/tlx-leafds"
+    )
+  endforeach()
 endforeach()

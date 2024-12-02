@@ -60,13 +60,28 @@ YCSBBench<IndexType, TableType>::YCSBBench(YCSBConfig config, TableType *table,
   workload_percentage_ =
       noname::benchmark::ycsb::YCSBConfig::preset_workloads.at(
           config_.workload_);
+  #if defined(ARTOLC) || defined(ART_LC)
+  records_ =
+      new ARTWrapper<ART_OLC::Tree, uint64_t,
+                        uint64_t>::Record[config_.option_.initial_table_size];
+  #endif
+  #ifdef ART_TABULAR
+  records_ =
+      new ARTWrapper<noname::tabular::art::Tree, uint64_t,
+                        uint64_t>::Record[config_.option_.initial_table_size];
+  #endif
 }
 
 template <typename IndexType, typename TableType>
 void YCSBBench<IndexType, TableType>::Load() {
   // The number of record to the inserted per loader should be (table size) / (#loaders)
   auto ycsb_load = YCSBLoad<IndexType, TableType>(
-      table_, index_, &thread_pool, config_.num_of_loaders_,
+      #if defined(ARTOLC) || defined(ART_LC) || defined(ART_TABULAR)
+      reinterpret_cast<TableType *>(records_),
+      #else
+      table_,
+      #endif
+      index_, &thread_pool, config_.num_of_loaders_,
       config_.option_.initial_table_size);
   auto start = util::GetCurrentUSec();
   ycsb_load.Run();
@@ -167,10 +182,10 @@ template <typename IndexType, typename TableType>
 uint64_t YCSBBench<IndexType, TableType>::GenerateRandomKey(YCSBWorkerLocalData *worker) {
   uint64_t r = 0;
   if (config_.option_.zipfian) {
-    r = worker->zipfian_random_.next();
+    r = worker->zipfian_random_.next() + 1;
   } else {
     r = worker->uniform_random_.uniform_within(
-        0, next_insert_key_.load(std::memory_order::acquire) - 1);
+        1, next_insert_key_.load(std::memory_order::acquire));
   }
   return r;
 }
@@ -282,10 +297,13 @@ bool YCSBBench<IndexType, TableType>::TxnRead(YCSBWorkerLocalData *worker) {
       worker->num_aborts -= 1;
       worker->num_read_aborts -= 1;
       ok = ret.value();
+      #elif defined(ARTOLC) || defined(ART_LC) || defined(ART_TABULAR)
+      auto bkey = __builtin_bswap64(random_key);
+      ok = index_->lookup(bkey, oid);
       #else  // Inherently no abort for BTREE_TABULAR variant
       ok = index_->lookup(random_key, oid);
       #endif
-      CHECK(ok || random_key >= config_.option_.initial_table_size)
+      CHECK(ok || random_key > config_.option_.initial_table_size)
           << "lookup for key " << random_key << " failed";
       result = oid;  // Prevent index lookup from being optimized out.
     }
@@ -336,10 +354,13 @@ bool YCSBBench<IndexType, TableType>::TxnUpdate(YCSBWorkerLocalData *worker) {
       worker->num_aborts -= 1;
       worker->num_update_aborts -= 1;
       ok =  ret.value();
+      #elif defined(ARTOLC) || defined(ART_LC) || defined(ART_TABULAR)
+      auto bkey = __builtin_bswap64(random_key);
+      ok = index_->update(bkey, reinterpret_cast<uint64_t>(&records_[random_key]));
       #else
       ok = index_->update(random_key, random_key);
       #endif
-      CHECK(ok);
+      CHECK(ok) << "Failed to update key: " << random_key;
     }
   }
   return true;
@@ -602,6 +623,38 @@ int main(int argc, char** argv) {
 #ifdef HASHTABLE_MVCC_TABULAR
   using IndexType = noname::tabular::MVCCHashTable<uint64_t, uint64_t>;
   auto index = IndexType(config);
+#endif
+#ifdef MASSTREE
+  using IndexType = noname::benchmark::ycsb::MasstreeWrapper<uint64_t, uint64_t>;
+  auto index = IndexType();
+#endif
+#if defined(ARTOLC) || defined(ART_LC)
+  using IndexType = noname::benchmark::ycsb::ARTWrapper<ART_OLC::Tree, uint64_t, uint64_t>;
+  auto tree = new ART_OLC::Tree(IndexType::loadKey, IndexType::removeNode);
+  auto index = IndexType(tree);
+#endif
+#ifdef ART_TABULAR
+  using IndexType =
+      noname::benchmark::ycsb::ARTWrapper<noname::tabular::art::Tree,
+                                             uint64_t, uint64_t>;
+  auto tree =
+      new noname::tabular::art::Tree(IndexType::loadKey, IndexType::removeNode,
+                                     config, is_persistent, log_dir, threads);
+  auto index = IndexType(tree);
+#endif
+#ifdef BPTREE
+  #ifndef BPTREE_INTERNAL_BYTES
+  #define BPTREE_INTERNAL_BYTES 1024
+  #endif
+  #ifndef BPTREE_LOG_SIZE
+  #define BPTREE_LOG_SIZE 32
+  #endif
+  #ifndef BPTREE_BLOCK_SIZE
+  #define BPTREE_BLOCK_SIZE 32
+  #endif
+  using IndexType = noname::benchmark::ycsb::BPTreeWrapper<
+      uint64_t, uint64_t, BPTREE_INTERNAL_BYTES, BPTREE_LOG_SIZE, BPTREE_BLOCK_SIZE>;
+  auto index = IndexType();
 #endif
 
   auto ycsb_bench =

@@ -1,0 +1,25 @@
+export PATH=~/xvdf_mounted/build/bin:$PATH
+
+
+to build in serial
+
+make basic
+
+to build in parallel
+
+make CILK=1 basic
+
+to run the correctness test
+./basic --update_test=true --el_count=1000 --verify
+
+to run the parallel copies test
+./basic --parallel_test=true --el_count=1000 --num_copies=1000
+
+where you change el_count, num_copies to the number of elts and copies you want to run
+
+to run the parallel copies test
+./basic --parallel_test_perf=true --el_count=1000 --num_copies=1000
+
+--
+other notes:
+to turn on asserts, change #DEBUG in test.cpp

@@ -1,0 +1,3 @@
+[submodule "StructOfArrays"]
+	path = StructOfArrays
+	url = git@github.com:wheatman/StructOfArrays.git

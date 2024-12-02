@@ -31,7 +31,6 @@ template <class Key, class Value>
 struct InlineBTree {
   tabular::TableGroup group;
   table::InlineTable *nodes;
-  bool is_persistent;
 
   static const size_t nodes_table_id = 0;
 
@@ -44,8 +43,10 @@ struct InlineBTree {
     group.StartEpochDaemon();
     nodes = group.GetTable(nodes_table_id, is_persistent);
     auto t = Transaction::BeginSystem(&group);
-    auto initial_node = t->arena->NextValue<BTreeLeafNode<Key, Value>>(
-        sizeof(BTreeNode)); // for accommodating both leaf and inner node
+    auto initial_node = reinterpret_cast<BTreeLeafNode<Key, Value> *>(
+        t->arena->Next(sizeof(BTreeNode))); // Use BTreeNode for accommodating
+                                           // both leaf and inner node
+    new (initial_node) BTreeLeafNode<Key, Value>;
     auto initial_root_id = t->Insert(nodes, initial_node, sizeof(BTreeNode));
     assert(initial_root_id == root_id);
     auto ok = t->PreCommit();
@@ -151,19 +152,21 @@ struct InlineBTree {
     // When used in pessimistic top-down insertion, the stack holds references
     // to exclusively latched nodes.
    private:
-    std::tuple<table::OID, NodeBase *> nodes[kMaxLevels];
+    std::tuple<table::OID, NodeBase *, bool, uint8_t> nodes[kMaxLevels];
     size_t top = 0;
 
    public:
-    void Push(table::OID oid, NodeBase * node) {
+    void Push(table::OID oid, NodeBase *node,
+              bool is_full = false, uint8_t level = 1
+              /* default values for additional parameters */) {
       assert(top < kMaxLevels);
-      nodes[top++] = std::make_tuple(oid, node);
+      nodes[top++] = std::make_tuple(oid, node, is_full, level);
     }
-    std::tuple<table::OID, NodeBase *> Pop() {
+    std::tuple<table::OID, NodeBase *, bool, uint8_t> Pop() {
       assert(top > 0);
       return nodes[--top];
     }
-    std::tuple<table::OID, NodeBase *> Top() const {
+    std::tuple<table::OID, NodeBase *, bool, uint8_t> Top() const {
       assert(top > 0);
       return nodes[top - 1];
     }
@@ -189,7 +192,7 @@ struct InlineBTree {
     return result == Result::SUCCEED;
   }
 
-  Result insert_internal_callback(const Key &k, Value v) {
+  Result insert_internal_callback_fast_path_only(const Key &k, Value v) {
     auto t = Transaction::BeginSystem(&group);
 
     // Fast path that doesn't split anything
@@ -240,14 +243,190 @@ struct InlineBTree {
     }
   }
 
-  BTreeInnerNode<Key> *MakeRoot(Transaction *t, Key sep, table::OID left_child_id, table::OID right_child_id, uint8_t child_level) {
-    auto root = t->arena->NextValue<BTreeInnerNode<Key>>();
+  void MakeRoot(BTreeInnerNode<Key> *root, Key sep, table::OID left_child_id,
+                table::OID right_child_id, uint8_t child_level) {
     root->count = 1;
     root->keys[0] = sep;
     root->children[0] = left_child_id;
     root->children[1] = right_child_id;
     root->level = child_level + 1;
-    return root;
+  }
+
+  Result insert_internal_callback(const Key &k, Value v) {
+    auto t = Transaction::BeginSystem(&group);
+    UnsafeNodeStack stashed_nodes;
+
+    // Fast path that doesn't split anything
+    table::OID next_id = root_id;
+    bool key_exists = false;
+    BTreeLeafNode<Key, Value> *leaf = nullptr;
+    bool release_ancestors = false;
+    NodeBase *curr_node = nullptr;
+    uint8_t curr_node_level = 0;
+
+    auto find_leaf_cb = [&k, &next_id, &key_exists, &leaf,
+                         &stashed_nodes, &release_ancestors, &curr_node,
+                         &curr_node_level](NodeBase *node) {
+      release_ancestors = false;
+      curr_node = node;
+      curr_node_level = node->level;
+      auto node_type = node->getType();
+      if (node_type == NodeType::Inner) {
+        auto inner = reinterpret_cast<BTreeInnerNode<Key> *>(node);
+        if (!inner->isFull()) {
+          release_ancestors = true;
+        }
+        next_id = inner->children[inner->lowerBound(k)];
+      } else {  // node_type == NodeType::Leaf
+        leaf = reinterpret_cast<BTreeLeafNode<Key, Value> *>(node);
+        if (!leaf->isFull()) {
+          release_ancestors = true;
+        }
+        if (leaf->key_exists(k)) {
+          key_exists = true;
+        }
+      }
+    };
+
+    do  {
+      auto curr_node_id = next_id;
+      t->ReadCallback<NodeBase>(nodes, next_id, find_leaf_cb);
+      if (release_ancestors) {
+        while (stashed_nodes.Size() > 0) {
+          stashed_nodes.Pop();
+        }
+      }
+      auto is_full = !release_ancestors;
+      stashed_nodes.Push(curr_node_id, curr_node, is_full, curr_node_level);
+    } while (!leaf);
+
+    if (key_exists) {
+      t->Rollback();
+      return Result::FAILED;
+    }
+
+    // Now next_oid points to the leaf
+    auto leaf_id = next_id;
+    if (!leaf->isFull()) {
+      // no need to split, just insert into [leaf]
+      assert(stashed_nodes.Size() == 1);
+      bool exists = leaf->key_exists(k);
+      if (exists) {
+        return Result::FAILED;
+      }
+      auto leaf_insert_cb = [&k, &v](uint8_t *data) {
+        auto leaf = reinterpret_cast<BTreeLeafNode<Key, Value> *>(data);
+        leaf->insert_no_existence_check(k, v);
+      };
+      t->UpdateRecordCallback(nodes, leaf_id, leaf_insert_cb);
+      auto ok = t->PreCommit();
+      if (!ok) {
+        t->Rollback();
+        return Result::TRANSACTION_FAILED;
+      }
+      t->PostCommit();
+      return Result::SUCCEED;
+    }
+
+    // handle splits
+    auto [top_node_id, top_node, top_is_full, top_level] = stashed_nodes.Top();
+    assert(leaf_id == top_node_id);
+    stashed_nodes.Pop();
+    Key sep;
+    // TODO(ziyi) put lambda literal in function call
+    auto split_leaf_cb = [&sep, leaf, &k, &v](uint8_t *data) {
+      new (data) BTreeLeafNode<Key, Value>;
+      auto split_leaf = reinterpret_cast<BTreeLeafNode<Key, Value> *>(data);
+      leaf->insert_no_existence_check(k, v); // insert one more than capacity
+      leaf->split_to(split_leaf, sep);
+    };
+    auto new_node_id = t->InsertCallback<BTreeLeafNode<Key, Value>>(
+        nodes, split_leaf_cb);
+    if (stashed_nodes.Size() == 0) {
+      // [leaf] has to be root
+      // insert leaf into a new record
+      // and update a newly created inner root node to root_id record
+      assert(root_id == leaf_id);
+      auto new_leaf_id = t->InsertCallback<BTreeLeafNode<Key, Value>>(
+          nodes, [leaf, new_node_id](uint8_t *data) {
+            new (data) BTreeLeafNode<Key, Value>;
+            auto new_leaf = reinterpret_cast<BTreeLeafNode<Key, Value> *>(data);
+            leaf->next_leaf = new_node_id;
+            *new_leaf = *leaf;
+          });
+      t->UpdateRecordCallback(
+          nodes, root_id,
+          [this, &sep, new_leaf_id, new_node_id](uint8_t *data) {
+            auto root = reinterpret_cast<BTreeInnerNode<Key> *>(data);
+            MakeRoot(root, sep, new_leaf_id, new_node_id, 1 /* leaf level is 1 */);
+          });
+    } else {
+      // [leaf] has a parent
+      // update leaf and insert it to its parent
+      t->UpdateRecordCallback(nodes, leaf_id, [new_node_id](uint8_t *data){
+        auto leaf = reinterpret_cast<BTreeLeafNode<Key, Value> *>(data);
+        leaf->next_leaf = new_node_id;
+      });
+      while (stashed_nodes.Size() > 1) {
+        auto [parent_id, stashed_node, is_full, parent_level] = stashed_nodes.Pop();
+        // assert(stashed_node->getType() == NodeType::Inner);
+        auto parent = reinterpret_cast<BTreeInnerNode<Key> *>(stashed_node);
+        t->UpdateRecordCallback(
+            nodes, parent_id, [&sep, new_node_id](uint8_t *data) {
+              auto parent = reinterpret_cast<BTreeInnerNode<Key> *>(data);
+              parent->insert(sep, new_node_id);
+            });
+        new_node_id = t->InsertCallback<BTreeInnerNode<Key>>(
+            nodes, [parent, &sep, new_node_id](uint8_t *data) {
+              new (data) BTreeInnerNode<Key>;
+              auto split_inner = reinterpret_cast<BTreeInnerNode<Key> *>(data);
+              parent->split_to(split_inner, sep);
+            });
+      }
+      assert(stashed_nodes.Size() == 1);
+      auto [parent_id, stashed_node, is_full, parent_level] = stashed_nodes.Pop();
+      // assert(stashed_node->getType() == NodeType::Inner);
+      auto parent = reinterpret_cast<BTreeInnerNode<Key> *>(stashed_node);
+      if (is_full) {
+        assert(parent_id == root_id);
+        auto new_split_inner_id = t->InsertCallback<BTreeInnerNode<Key>>(
+            nodes, [parent, &sep, new_node_id](uint8_t *data) {
+              new (data) BTreeInnerNode<Key>;
+              auto split_inner = reinterpret_cast<BTreeInnerNode<Key> *>(data);
+              parent->insert(sep, new_node_id);
+              parent->split_to(split_inner, sep);
+            });
+        // insert updated parent into a new record
+        // and update newly created inner node to root_id record
+        auto new_parent_id =
+            t->InsertCallback<BTreeInnerNode<Key>>(nodes, [parent](uint8_t *data) {
+              new (data) BTreeInnerNode<Key>;
+              auto new_parent = reinterpret_cast<BTreeInnerNode<Key> *>(data);
+              *new_parent = *parent;
+            });
+        t->UpdateRecordCallback(
+            nodes, root_id,
+            [this, &sep, new_parent_id, new_split_inner_id,
+             parent_level](uint8_t *data) {
+              auto root = reinterpret_cast<BTreeInnerNode<Key> *>(data);
+              MakeRoot(root, sep, new_parent_id, new_split_inner_id,
+                       parent_level);
+            });
+      } else {
+        // We have finally found some space
+        t->UpdateRecordCallback(nodes, parent_id, [parent, &sep, new_node_id](uint8_t *data){
+          auto parent = reinterpret_cast<BTreeInnerNode<Key> *>(data);
+          parent->insert(sep, new_node_id);
+        });
+      }
+    }
+    auto ok = t->PreCommit();
+    if (!ok) {
+      t->Rollback();
+      return Result::TRANSACTION_FAILED;
+    }
+    t->PostCommit();
+    return Result::SUCCEED;
   }
 
   Result insert_internal_slow(const Key &k, Value v) {
@@ -317,7 +496,7 @@ struct InlineBTree {
     if (!ok) {
       return Result::FAILED;
     }
-    auto [top_node_id, top_node] = stashed_nodes.Top();
+    auto [top_node_id, top_node, top_is_full, top_level] = stashed_nodes.Top();
     assert(leaf_id == top_node_id);
     stashed_nodes.Pop();
     Key sep;
@@ -331,15 +510,12 @@ struct InlineBTree {
       // and update a newly created inner root node to root_id record
       assert(root_id == leaf_id);
       auto new_leaf_id = t->Insert(nodes, leaf);
-      auto new_root = MakeRoot(t, sep, new_leaf_id, new_node_id, leaf->level);
-      // TODO(ziyi) cannot apply in-place update as the same reason as L310
+      auto new_root = t->arena->NextValue<BTreeInnerNode<Key>>();
+      MakeRoot(new_root, sep, new_leaf_id, new_node_id, leaf->level);
       t->Update(nodes, root_id, new_root);
     } else {
       // [leaf] has a parent
       // update leaf and insert it to its parent
-      // TODO(ziyi) cannot simply change this to in-place update
-      //   because leaf may be inserted at L265
-      //   and t->Insert doesn't support callback yet.
       t->Update(nodes, leaf_id, leaf);
       while (stashed_nodes.Size() > 1) {
         auto [parent_id, stashed_node] = stashed_nodes.Pop();
@@ -364,8 +540,8 @@ struct InlineBTree {
         // insert updated parent into a new record
         // and update newly created inner node to root_id record
         auto new_parent_id = t->Insert(nodes, parent);
-        auto new_root = MakeRoot(t, sep, new_parent_id, new_split_inner_id, parent->level);
-        // TODO(ziyi) also cannot simply change this because parent was inserted at L307
+        auto new_root = t->arena->NextValue<BTreeInnerNode<Key>>();
+        MakeRoot(new_root, sep, new_parent_id, new_split_inner_id, parent->level);
         t->Update(nodes, root_id, new_root);
       } else {
         // We have finally found some space
@@ -446,7 +622,7 @@ struct InlineBTree {
     if (!ok) {
       return Result::FAILED;
     }
-    auto [top_node_id, top_node] = stashed_nodes.Top();
+    auto [top_node_id, top_node, top_is_full, top_level] = stashed_nodes.Top();
     assert(leaf_id == top_node_id);
     stashed_nodes.Pop();
     Key sep;
@@ -460,15 +636,16 @@ struct InlineBTree {
       // and update a newly created inner root node to root_id record
       assert(root_id == leaf_id);
       auto new_leaf_id = t->Insert(nodes, leaf);
-      auto new_root = MakeRoot(t, sep, new_leaf_id, new_node_id, leaf->level);
+      auto new_root = t->arena->NextValue<BTreeInnerNode<Key>>();
+      MakeRoot(new_root, sep, new_leaf_id, new_node_id, leaf->level);
       t->Update(nodes, root_id, new_root);
     } else {
       // [leaf] has a parent
       // update leaf and insert it to its parent
       t->Update(nodes, leaf_id, leaf);
       while (stashed_nodes.Size() > 1) {
-        auto [parent_id, stashed_node] = stashed_nodes.Pop();
-        assert(stashed_node->getType() == NodeType::Inner);
+        auto [parent_id, stashed_node, is_full, parent_level] = stashed_nodes.Pop();
+        // assert(stashed_node->getType() == NodeType::Inner);
         auto parent = reinterpret_cast<BTreeInnerNode<Key> *>(stashed_node);
         parent->insert(sep, new_node_id);
         auto split_inner = t->arena->NextValue<BTreeInnerNode<Key>>();
@@ -477,8 +654,8 @@ struct InlineBTree {
         new_node_id = t->Insert(nodes, split_inner);
       }
       assert(stashed_nodes.Size() == 1);
-      auto [parent_id, stashed_node] = stashed_nodes.Pop();
-      assert(stashed_node->getType() == NodeType::Inner);
+      auto [parent_id, stashed_node, is_full, parent_level] = stashed_nodes.Pop();
+      // assert(stashed_node->getType() == NodeType::Inner);
       auto parent = reinterpret_cast<BTreeInnerNode<Key> *>(stashed_node);
       if (parent->isFull()) {
         assert(parent_id == root_id);
@@ -489,7 +666,8 @@ struct InlineBTree {
         // insert updated parent into a new record
         // and update newly created inner node to root_id record
         auto new_parent_id = t->Insert(nodes, parent);
-        auto new_root = MakeRoot(t, sep, new_parent_id, new_split_inner_id, parent->level);
+        auto new_root = t->arena->NextValue<BTreeInnerNode<Key>>();
+        MakeRoot(new_root, sep, new_parent_id, new_split_inner_id, parent->level);
         t->Update(nodes, root_id, new_root);
       } else {
         // We have finally found some space

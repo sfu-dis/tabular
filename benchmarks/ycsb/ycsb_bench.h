@@ -64,6 +64,24 @@
 #ifdef HASHTABLE_MVCC_TABULAR
 #include "tabular/mvcc_hash_table.h"
 #endif
+#ifdef MASSTREE
+#include "masstree_wrapper.h"
+#endif
+#ifdef ARTOLC
+#include "art_wrapper.h"
+#include "index/indexes/ARTOLC/Tree.h"
+#endif
+#ifdef ART_LC
+#include "art_wrapper.h"
+#include "index/indexes/ARTLC/Tree.h"
+#endif
+#ifdef ART_TABULAR
+#include "art_wrapper.h"
+#include "tabular/art/Tree.h"
+#endif
+#ifdef BPTREE
+#include "bptree_wrapper.h"
+#endif
 
 namespace noname {
 namespace benchmark {
@@ -139,6 +157,13 @@ struct YCSBBench : public PerformanceTest {
   std::atomic<uint64_t> next_insert_key_;
 
   WorkloadPercentage workload_percentage_;
+
+  #if defined(ARTOLC) || defined(ART_LC)
+  ARTWrapper<ART_OLC::Tree, uint64_t, uint64_t>::Record *records_;
+  #endif
+  #ifdef ART_TABULAR
+  ARTWrapper<noname::tabular::art::Tree, uint64_t, uint64_t>::Record *records_;
+  #endif
 };
 
 }  // namespace ycsb

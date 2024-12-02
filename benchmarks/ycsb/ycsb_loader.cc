@@ -67,6 +67,10 @@ void YCSBLoad<IndexType, TableType>::Load(uint32_t thread_id,
     }
     nb_aborts -= 1;
     ok = result == IndexType::Result::SUCCEED;
+#elif defined(ARTOLC) || defined(ART_LC) || defined(ART_TABULAR)
+    auto bkey = __builtin_bswap64(key);
+    records_[key].key = bkey;
+    ok = index_->insert(bkey, reinterpret_cast<uint64_t>(&records_[key]));
 #else
     ok = index_->insert(key, key);
 #endif
@@ -95,7 +99,8 @@ void YCSBLoad<IndexType, TableType>::Run() {
       end = num_of_records_;
     }
     thread::Thread* t = thread_pool_->GetThread(false);
-    t->StartTask([this, i, start, end] { Load(i, start, end); });
+    // NOTE(ziyi) do not insert 0 as ART doesn't support it
+    t->StartTask([this, i, start, end] { Load(i, start + 1, end + 1); });
     threads.push_back(t);
   }
 
@@ -116,9 +121,24 @@ void YCSBLoad<IndexType, TableType>::Run() {
 
 template <class IndexType, class TableType>
 void YCSBLoad<IndexType, TableType>::Verify() {
-  for (size_t i = 0; i < num_of_records_; i++) {
+  for (size_t i = 1; i <= num_of_records_; i++) {
+    #if defined(ARTOLC) || defined(ART_LC) || defined(ART_TABULAR)
+    auto bkey = __builtin_bswap64(i);
+    auto ok = index_->update(bkey, reinterpret_cast<uint64_t>(&records_[i]));
+    #else
+    auto ok = index_->update(i, i);
+    #endif
+    LOG_IF(FATAL, !ok) << "Failed to update key: " << i;
+  }
+
+  for (size_t i = 1; i <= num_of_records_; i++) {
     uint64_t value;
+    #if defined(ARTOLC) || defined(ART_LC) || defined(ART_TABULAR)
+    auto bkey = __builtin_bswap64(i);
+    auto ok = index_->lookup(bkey, value);
+    #else
     auto ok = index_->lookup(i, value);
+    #endif
     LOG_IF(FATAL, !ok) << "Missing key: " << i;
   }
 
@@ -158,6 +178,34 @@ template class YCSBLoad<noname::tabular::HashTable<uint64_t, uint64_t>,
 #endif
 #ifdef HASHTABLE_MVCC_TABULAR
 template class YCSBLoad<noname::tabular::MVCCHashTable<uint64_t, uint64_t>,
+                        table::IndirectionArrayTable>;
+#endif
+#ifdef MASSTREE
+template class YCSBLoad<noname::benchmark::ycsb::MasstreeWrapper<uint64_t, uint64_t>,
+                        table::IndirectionArrayTable>;
+#endif
+#if defined(ARTOLC) || defined(ART_LC)
+template class YCSBLoad<noname::benchmark::ycsb::ARTWrapper<ART_OLC::Tree, uint64_t, uint64_t>,
+                        table::IndirectionArrayTable>;
+#endif
+#ifdef ART_TABULAR
+template class YCSBLoad<noname::benchmark::ycsb::ARTWrapper<
+                            noname::tabular::art::Tree, uint64_t, uint64_t>,
+                        table::IndirectionArrayTable>;
+#endif
+#ifdef BPTREE
+  #ifndef BPTREE_INTERNAL_BYTES
+  #define BPTREE_INTERNAL_BYTES 1024
+  #endif
+  #ifndef BPTREE_LOG_SIZE
+  #define BPTREE_LOG_SIZE 32
+  #endif
+  #ifndef BPTREE_BLOCK_SIZE
+  #define BPTREE_BLOCK_SIZE 32
+  #endif
+template class YCSBLoad<noname::benchmark::ycsb::BPTreeWrapper<
+                            uint64_t, uint64_t, BPTREE_INTERNAL_BYTES,
+                            BPTREE_LOG_SIZE, BPTREE_BLOCK_SIZE>,
                         table::IndirectionArrayTable>;
 #endif
 

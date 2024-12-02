@@ -198,6 +198,7 @@ bool Transaction::PreCommit() {
         // TODO(ziyi) directly copy after image to log buffer
         std::memcpy(data, entry.record->data, entry.record->size);
         entry.data = data;
+        entry.size = entry.record->size;
       }
     } else {
       std::memcpy(entry.record->data, entry.data, entry.size);
@@ -226,6 +227,7 @@ bool Transaction::PostCommit() {
 
   for (uint8_t i = 0; i < write_set.count; ++i) {
     auto &entry = write_set.entries[i];
+    CHECK_NE(entry.size, 0);
     if (!entry.table->is_persistent) {
       continue;
     }

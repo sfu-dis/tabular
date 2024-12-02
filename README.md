@@ -28,26 +28,35 @@ make -j`nproc`
 ## Index Benchmarks
 ### Variants
 Hand-crafted:
-- `btree_olc`
-- `hashtable_olc`
+- `btree_olc_bench_256`
+- `hashtable_olc_bench_256`
+- `art_olc_bench`
 
 Tabular:
-- `btree_inline_tabular`
-- `hashtable_inline_tabular`
+- `btree_inline_tabular_bench_256`
+- `hashtable_inline_tabular_bench_256`
+- `art_tabular_bench`
 
 Naive-OCC:
-- `btree_inline_tabular_materialized`
-- `hashtable_inline_tabular_materialized`
+- `btree_inline_tabular_materialized_bench_256`
+- `hashtable_inline_tabular_materialized_bench_256`
+- `art_tabular_materialized_bench`
 
 Naive-MVCC:
-- `btree_tabular`
-- `hashtable_mvcc_tabular`
+- `btree_tabular_bench_256`
+- `hashtable_mvcc_tabular_bench_256`
 
 Pessimistic Locking:
-- `btree_lc_stdrw`
-- `btree_lc_tbbrw`
-- `hashtable_lc_stdrw`
-- `hashtable_lc_tbbrw`
+- `btree_lc_stdrw_bench_256`
+- `btree_lc_tbbrw_bench_256`
+- `hashtable_lc_stdrw_bench_256`
+- `hashtable_lc_tbbrw_bench_256`
+- `art_lc_stdrw_bench`
+- `art_lc_tbbrw_bench`
+
+Other indexes:
+- `bptree_bench_1K_16_16`
+- `masstree_bench`
 
 ### Workload Types
 - `C`: Lookup-only
@@ -59,11 +68,9 @@ Pessimistic Locking:
 ### Command-line interface
 ```shell
 # Volatile
-$BUILD_DIR/benchmarks/ycsb/ycsb_<variant>_bench_256 --workload <workload> --threads <number of threads> --records <number of keys> --duration <seconds>
-# Persistent
-$BUILD_DIR/benchmarks/ycsb/ycsb_<variant>_bench_256 --workload <workload> --threads <number of threads> --records <number of keys> --duration <seconds> --persistent --log-dir=<logging directory>
-# Persistent (No I/O)
-$BUILD_DIR/benchmarks/ycsb/ycsb_<variant>_log_nop_bench_256 --workload <workload> --threads <number of threads> --records <number of keys> --duration <seconds> --persistent --log-dir=<logging directory>
+$BUILD_DIR/benchmarks/ycsb/ycsb_<variant> --workload <workload> --threads <number of threads> --records <number of keys> --duration <seconds>
+# Persistent (only works for Tabular indexes)
+$BUILD_DIR/benchmarks/ycsb/ycsb_<variant> --workload <workload> --threads <number of threads> --records <number of keys> --duration <seconds> --persistent --log-dir=<logging directory>
 ```
 
 ## TPC-C Benchmarks

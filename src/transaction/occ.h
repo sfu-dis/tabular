@@ -91,6 +91,24 @@ struct Transaction {
   };
 
   table::OID InsertData(table::InlineTable *table, const uint8_t *data, size_t size);
+  // TODO(ziyi) make `Callback = void (T *)` and test whether there will be any
+  // extra cost
+  template <typename T, typename Callback>
+  table::OID InsertCallback(table::InlineTable *table,
+                            const Callback &callback) {
+    return InsertRecordCallback(table, sizeof(T), callback);
+  }
+  template <typename Callback>
+  table::OID InsertRecordCallback(table::InlineTable *table, size_t size,
+                                  const Callback &callback) {
+    auto oid = table->AllocateRecord(size);
+    auto record = table->GetRecord(oid);
+    write_set.AddCallback(table, record, oid, callback, size);
+    if (table->is_persistent) {
+      log_size += log::LogRecord::GetExpectSize(size);
+    }
+    return oid;
+  }
 
   template <typename T>
   inline table::OID Insert(table::InlineTable *table, const T *value, size_t size = sizeof(T)) {

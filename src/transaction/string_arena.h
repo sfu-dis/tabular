@@ -16,7 +16,10 @@
 
 #pragma once
 
+#include <glog/logging.h>
+
 #include <cstdlib>
+#include <utility>
 
 #include "noname_defs.h"
 
@@ -54,10 +57,11 @@ class StringArena {
     return str + off;
   }
 
-  template <typename T>
-  T *NextValue(size_t size = sizeof(T)) {
+  template <typename T, typename... Args>
+  T *NextValue(Args&&... args) {
+    size_t size = sizeof(T);
     auto val = reinterpret_cast<T *>(Next(size));
-    new (val) T;
+    new (val) T(std::forward<Args>(args)...);
     return val;
   }
 

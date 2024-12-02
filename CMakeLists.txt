@@ -125,6 +125,8 @@ add_subdirectory(src/table)
 add_subdirectory(src/thread)
 add_subdirectory(src/transaction)
 add_subdirectory(src/tabular)
+add_subdirectory(src/index/indexes/ARTOLC)
+add_subdirectory(src/index/indexes/ARTLC)
 add_subdirectory(tests)
 add_subdirectory(benchmarks)
 

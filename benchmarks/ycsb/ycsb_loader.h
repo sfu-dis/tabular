@@ -56,6 +56,24 @@
 #ifdef HASHTABLE_MVCC_TABULAR
 #include "tabular/mvcc_hash_table.h"
 #endif
+#ifdef MASSTREE
+#include "masstree_wrapper.h"
+#endif
+#ifdef ARTOLC
+#include "art_wrapper.h"
+#include "index/indexes/ARTOLC/Tree.h"
+#endif
+#ifdef ART_LC
+#include "art_wrapper.h"
+#include "index/indexes/ARTLC/Tree.h"
+#endif
+#ifdef ART_TABULAR
+#include "art_wrapper.h"
+#include "tabular/art/Tree.h"
+#endif
+#ifdef BPTREE
+#include "bptree_wrapper.h"
+#endif
 #include "table/ia_table.h"
 #include "thread/thread.h"
 #include "transaction/transaction.h"
@@ -70,14 +88,22 @@ namespace ycsb {
 template <class IndexType, class TableType>
 struct YCSBLoad {
   /// Constructor
-  YCSBLoad(TableType* table, IndexType* index, thread::ThreadPool *thread_pool,
-           int32_t num_of_loaders, int32_t num_of_records)
-      : table_(table),
-        index_(index),
-        thread_pool_(thread_pool),
-        num_of_loaders_(num_of_loaders),
-        num_of_records_(num_of_records),
-        num_of_finished_threads_(0) {}
+  YCSBLoad(TableType *table, IndexType *index,
+           thread::ThreadPool *thread_pool, int32_t num_of_loaders,
+           int32_t num_of_records)
+      : table_(table), index_(index), thread_pool_(thread_pool),
+        num_of_loaders_(num_of_loaders), num_of_records_(num_of_records),
+        num_of_finished_threads_(0) {
+    // NOTE(ziyi) re-purpose table_ pointer as the pointer to records for ART
+#if defined(ARTOLC) || defined(ART_LC)
+    records_ = reinterpret_cast<
+        ARTWrapper<ART_OLC::Tree, uint64_t, uint64_t>::Record *>(table_);
+#elif defined(ART_TABULAR)
+    records_ = reinterpret_cast<
+        ARTWrapper<noname::tabular::art::Tree, uint64_t, uint64_t>::Record *>(
+        table_);
+#endif
+  }
 
  public:
   /// @brief Load worker function which inserts keys in range [key_start, end)
@@ -115,6 +141,13 @@ struct YCSBLoad {
 
   /// @brief Conditional variable
   std::condition_variable finish_cv_;
+
+  #if defined(ARTOLC) || defined(ART_LC)
+  ARTWrapper<ART_OLC::Tree, uint64_t, uint64_t>::Record *records_;
+  #endif
+  #ifdef ART_TABULAR
+  ARTWrapper<noname::tabular::art::Tree, uint64_t, uint64_t>::Record *records_;
+  #endif
 };
 
 }  // namespace ycsb
