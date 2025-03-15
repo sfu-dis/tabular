@@ -1,4 +1,13 @@
-# Tabular
+## Tabular: Efficiently Building Efficient Indexes
+
+Tabular is a parallel programming library that models data structures as relational tables to provide concurrency and persistence transparently. 
+
+More details are described in our VLDB 2025 paper below (preprint [here](https://www.cs.sfu.ca/~tzwang/tabular.pdf)). If you use our work, please cite:
+```
+Tabular: Efficiently Building Efficient Indexes.
+Ziyi Yan, Mohamed Farouk Drira, Tianxun Hu and Tianzheng Wang.
+VLDB 2025
+```
 
 ## Setup
 ### Hugepages
