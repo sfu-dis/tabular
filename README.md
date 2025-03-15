@@ -1,4 +1,4 @@
-## Tabular: Efficiently Building Efficient Indexes
+# Tabular: Efficiently Building Efficient Indexes
 
 Tabular is a new parallel programming library that models data structures as ACID relational tables to provide concurrency and persistence transparently. 
 
