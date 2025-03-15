@@ -1,6 +1,8 @@
 ## Tabular: Efficiently Building Efficient Indexes
 
-Tabular is a parallel programming library that models data structures as ACID relational tables to provide concurrency and persistence transparently. 
+Tabular is a new parallel programming library that models data structures as ACID relational tables to provide concurrency and persistence transparently. 
+
+Tabular turns a single-threaded in-memory index into a concurrent, persistent counterpart without requiring the developer using parallel programming techniques, easing programming effort.
 
 More details are described in our VLDB 2025 paper below (preprint [here](https://www.cs.sfu.ca/~tzwang/tabular.pdf)). If you use our work, please cite:
 ```
