@@ -261,11 +261,12 @@ struct InlineBTree {
     bool key_exists = false;
     BTreeLeafNode<Key, Value> *leaf = nullptr;
     bool release_ancestors = false;
+    bool leaf_is_full;
     NodeBase *curr_node = nullptr;
     uint8_t curr_node_level = 0;
 
-    auto find_leaf_cb = [&k, &next_id, &key_exists, &leaf,
-                         &stashed_nodes, &release_ancestors, &curr_node,
+    auto find_leaf_cb = [&k, &next_id, &key_exists, &leaf, &stashed_nodes,
+                         &release_ancestors, &leaf_is_full, &curr_node,
                          &curr_node_level](NodeBase *node) {
       release_ancestors = false;
       curr_node = node;
@@ -279,6 +280,7 @@ struct InlineBTree {
         next_id = inner->children[inner->lowerBound(k)];
       } else {  // node_type == NodeType::Leaf
         leaf = reinterpret_cast<BTreeLeafNode<Key, Value> *>(node);
+        leaf_is_full = leaf->isFull();
         if (!leaf->isFull()) {
           release_ancestors = true;
         }
@@ -307,13 +309,9 @@ struct InlineBTree {
 
     // Now next_oid points to the leaf
     auto leaf_id = next_id;
-    if (!leaf->isFull()) {
+    if (!leaf_is_full) {
       // no need to split, just insert into [leaf]
       assert(stashed_nodes.Size() == 1);
-      bool exists = leaf->key_exists(k);
-      if (exists) {
-        return Result::FAILED;
-      }
       auto leaf_insert_cb = [&k, &v](uint8_t *data) {
         auto leaf = reinterpret_cast<BTreeLeafNode<Key, Value> *>(data);
         leaf->insert_no_existence_check(k, v);
@@ -369,7 +367,7 @@ struct InlineBTree {
       });
       while (stashed_nodes.Size() > 1) {
         auto [parent_id, stashed_node, is_full, parent_level] = stashed_nodes.Pop();
-        // assert(stashed_node->getType() == NodeType::Inner);
+        assert(stashed_node->getType() == NodeType::Inner);
         auto parent = reinterpret_cast<BTreeInnerNode<Key> *>(stashed_node);
         t->UpdateRecordCallback(
             nodes, parent_id, [&sep, new_node_id](uint8_t *data) {
@@ -385,7 +383,7 @@ struct InlineBTree {
       }
       assert(stashed_nodes.Size() == 1);
       auto [parent_id, stashed_node, is_full, parent_level] = stashed_nodes.Pop();
-      // assert(stashed_node->getType() == NodeType::Inner);
+      assert(stashed_node->getType() == NodeType::Inner);
       auto parent = reinterpret_cast<BTreeInnerNode<Key> *>(stashed_node);
       if (is_full) {
         assert(parent_id == root_id);
