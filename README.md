@@ -8,7 +8,7 @@ More details are described in our VLDB 2025 paper below (preprint [here](https:/
 ```
 Tabular: Efficiently Building Efficient Indexes.
 Ziyi Yan, Mohamed Farouk Drira, Tianxun Hu and Tianzheng Wang.
-VLDB 2025
+PVLDB 18(6) (VLDB 2025)
 ```
 
 ## Setup
